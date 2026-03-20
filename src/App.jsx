@@ -4,8 +4,8 @@ import { Search, ChevronRight, ArrowLeft, Check, Layers, Package, Sliders, Chevr
 // --- 配置区域 ---
 const THEME_COLOR = "#EE1144";
 const LOGO_SRC = "./图片.png"; 
-// 您的 Google Drive CSV 链接
-const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSZDcOAJJhH6IvV-_wClkrQmAtqhkcu7aUJ5KBFCYnPvE_TFamUfo0jt5Yugf9yxQ/pub?output=csv";
+// 更新为你最新的 Google Drive CSV 链接
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSbocj5C7nkIAemur0C5R0afJVvJfVOBts6tQ2cbrLoUVYpzelpLrdChHPXyr2TZvN9apPpLq6L3kuc/pub?output=csv";
 
 // --- 双语字典 ---
 const DICT = {
@@ -169,7 +169,7 @@ export default function App() {
   // 动态生成基于当前语言的产品列表
   const products = useMemo(() => {
     return productsRaw.map(p => ({
-      id: p.id,
+      id: p.id || Math.random().toString(),
       image: p.image,
       images: parseList(p.images),
       detailImages: parseList(p.detailImages),
@@ -579,7 +579,7 @@ export default function App() {
                     lang === 'ko' ? { step: '01', title: '요구사항 확인', desc: '제품 선택, 디자인 요구사항 및 핵심 매개변수 확인.' } : { step: '01', title: '需求沟通', desc: '确认产品选型、外观定制要求及核心参数。' },
                     lang === 'ko' ? { step: '02', title: '샘플 제작', desc: '요구사항에 따른 실물 샘플 제작 및 세부 확인.' } : { step: '02', title: '样品打样', desc: '根据需求制作实物样品，确认细节。' },
                     lang === 'ko' ? { step: '03', title: '계약 체결', desc: '최종 가격, MOQ 및 납기일 확인.' } : { step: '03', title: '签订合同', desc: '确认最终价格、起订量(MOQ)及交期。' },
-                    lang === 'ko' ? { step: '04', title: '대량 생산', 시: '엄격한 품질 관리 및 효율적인 생산.' } : { step: '04', title: '批量生产', desc: '严格把控生产品质，高效制造。' },
+                    lang === 'ko' ? { step: '04', title: '대량 생산', desc: '엄격한 품질 관리 및 효율적인 생산.' } : { step: '04', title: '批量生产', desc: '严格把控生产品质，高效制造。' },
                     lang === 'ko' ? { step: '05', title: '검수 및 배송', desc: '품질 검사 완료 및 글로벌 물류 배송 준비.' } : { step: '05', title: '验货交付', desc: '完成品控检验，安排全球物流发货。' }
                   ].map((item, idx) => (
                     <div key={idx} className="flex gap-4">
