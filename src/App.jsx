@@ -100,12 +100,16 @@ export default function App() {
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [expandedGroups, setExpandedGroups] = useState([]);
   
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedProductId, setSelectedProductId] = useState(null);
   const [activeModal, setActiveModal] = useState(null); 
 
   // 获取 Google Sheets 数据
   useEffect(() => {
-    fetch(CSV_URL)
+    // 【更新点1】：添加时间戳防缓存，确保每次加载网页强制向 Google 拉取最新数据
+    const timestamp = new Date().getTime();
+    const fetchUrl = CSV_URL.includes('?') ? `${CSV_URL}&_t=${timestamp}` : `${CSV_URL}?_t=${timestamp}`;
+
+    fetch(fetchUrl, { cache: 'no-store' })
       .then(res => res.text())
       .then(csvText => {
         const rows = parseCSV(csvText);
@@ -118,11 +122,13 @@ export default function App() {
           const headers = rows[HEADER_ROW_INDEX].map(h => h ? h.trim() : '');
           
           // 从第6行（A6）及之后作为实际产品数据
-          const data = rows.slice(HEADER_ROW_INDEX + 1).filter(r => r.length > 0 && r[0]).map(row => {
+          const data = rows.slice(HEADER_ROW_INDEX + 1).filter(r => r.length > 0 && r[0]).map((row, index) => {
             const obj = {};
             headers.forEach((h, i) => { 
               if (h) obj[h] = row[i] ? row[i].trim() : ''; 
             });
+            // 【更新点2】：如果没有提供 id 字段，绑定固定的行号作为 ID，防止随机 ID 导致详情页丢失
+            if (!obj.id) obj.id = `row-${index}`;
             return obj;
           });
           setProductsRaw(data);
@@ -144,13 +150,7 @@ export default function App() {
     return () => { clearTimeout(fadeTimer); clearTimeout(removeTimer); };
   }, []);
 
-  useEffect(() => {
-    if (selectedProduct) window.scrollTo(0, 0);
-  }, [selectedProduct]);
-
-  // 工具函数：解析多行文本
   const parseList = (str) => str ? str.split('\n').map(s => s.trim()).filter(Boolean) : [];
-  // 工具函数：解析规格 "键:值"
   const parseSpecs = (str) => {
     if (!str) return {};
     const specs = {};
@@ -169,23 +169,31 @@ export default function App() {
   // 动态生成基于当前语言的产品列表
   const products = useMemo(() => {
     return productsRaw.map(p => ({
-      id: p.id || Math.random().toString(),
+      id: p.id,
       image: p.image,
       images: parseList(p.images),
       detailImages: parseList(p.detailImages),
       moq: p.moq,
       price: p.price,
-      // 根据语言动态映射字段
-      group: lang === 'ko' ? p.group_ko : p.group_zh,
-      category: lang === 'ko' ? p.category_ko : p.category_zh,
-      name: lang === 'ko' ? p.name_ko : p.name_zh,
-      shortDesc: lang === 'ko' ? p.shortDesc_ko : p.shortDesc_zh,
-      leadTime: lang === 'ko' ? p.leadTime_ko : p.leadTime_zh,
-      features: parseList(lang === 'ko' ? p.features_ko : p.features_zh),
-      oemOptions: parseList(lang === 'ko' ? p.oemOptions_ko : p.oemOptions_zh),
-      specs: parseSpecs(lang === 'ko' ? p.specs_ko : p.specs_zh),
+      // 【更新点3】：加入兜底逻辑 (Fallback)，如果中文列未填数据，将默认回退显示韩文，防止空白
+      group: (lang === 'ko' ? p.group_ko : p.group_zh) || p.group_ko || p.group || '',
+      category: (lang === 'ko' ? p.category_ko : p.category_zh) || p.category_ko || p.category || '',
+      name: (lang === 'ko' ? p.name_ko : p.name_zh) || p.name_ko || p.name || '',
+      shortDesc: (lang === 'ko' ? p.shortDesc_ko : p.shortDesc_zh) || p.shortDesc_ko || p.shortDesc || '',
+      leadTime: (lang === 'ko' ? p.leadTime_ko : p.leadTime_zh) || p.leadTime_ko || p.leadTime || '',
+      features: parseList((lang === 'ko' ? p.features_ko : p.features_zh) || p.features_ko || p.features || ''),
+      oemOptions: parseList((lang === 'ko' ? p.oemOptions_ko : p.oemOptions_zh) || p.oemOptions_ko || p.oemOptions || ''),
+      specs: parseSpecs((lang === 'ko' ? p.specs_ko : p.specs_zh) || p.specs_ko || p.specs || ''),
     }));
   }, [productsRaw, lang]);
+
+  const selectedProduct = useMemo(() => {
+    return products.find(p => p.id === selectedProductId) || null;
+  }, [products, selectedProductId]);
+
+  useEffect(() => {
+    if (selectedProduct) window.scrollTo(0, 0);
+  }, [selectedProduct]);
 
   // 动态提取品类树状结构
   const categoryGroups = useMemo(() => {
@@ -243,7 +251,7 @@ export default function App() {
       <nav className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-20">
-            <div className="flex items-center cursor-pointer" onClick={() => setSelectedProduct(null)}>
+            <div className="flex items-center cursor-pointer" onClick={() => setSelectedProductId(null)}>
               <div className="flex items-center gap-3">
                 <img src={LOGO_SRC} alt="SPMS Logo" className="h-8 object-contain" onError={(e)=>{e.target.style.display='none';e.target.nextElementSibling.style.display='block';}} />
                 <div className="hidden text-3xl font-black tracking-tighter" style={{ color: THEME_COLOR }}>SPMS</div>
@@ -255,7 +263,7 @@ export default function App() {
             </div>
             
             <div className="flex space-x-4 md:space-x-8 items-center">
-              <button onClick={() => setSelectedProduct(null)} className="hidden md:block text-sm font-medium text-gray-900 hover:text-[#EE1144] transition-colors">{t('catalog')}</button>
+              <button onClick={() => setSelectedProductId(null)} className="hidden md:block text-sm font-medium text-gray-900 hover:text-[#EE1144] transition-colors">{t('catalog')}</button>
               <button onClick={() => setActiveModal('process')} className="hidden md:block text-sm font-medium text-gray-500 hover:text-[#EE1144] transition-colors">{t('process')}</button>
               <button onClick={() => setActiveModal('contact')} className="hidden md:block text-sm font-medium text-gray-500 hover:text-[#EE1144] transition-colors">{t('contact')}</button>
               
@@ -388,7 +396,7 @@ export default function App() {
                       <div 
                         key={product.id} 
                         className="group bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-xl hover:border-transparent transition-all duration-300 cursor-pointer flex flex-col"
-                        onClick={() => setSelectedProduct(product)}
+                        onClick={() => setSelectedProductId(product.id)}
                       >
                         <div className="aspect-[4/3] bg-gray-50 overflow-hidden relative">
                           <img 
@@ -429,7 +437,7 @@ export default function App() {
              ========================================= */
           <div className="animate-in slide-in-from-bottom-4 duration-500 fade-in">
             <button 
-              onClick={() => setSelectedProduct(null)}
+              onClick={() => setSelectedProductId(null)}
               className="inline-flex items-center text-sm font-medium text-gray-500 hover:text-gray-900 mb-8 transition-colors group"
             >
               <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" />
