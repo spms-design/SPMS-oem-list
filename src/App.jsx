@@ -17,6 +17,7 @@ const DICT = {
     heroSub: '브랜드 가치를 높여보세요. 산업 디자인부터 대량 생산까지, 원스톱 프리미엄 하드웨어 OEM/ODM 솔루션을 제공합니다.',
     searchPlaceholder: '제품 또는 기능 검색...',
     catSearchPlaceholder: '카테고리 검색...',
+    allTopCat: '전체 대분류',  // 新增：全部大类
     allCat: '전체 카테고리',
     noProduct: '관련 제품을 찾을 수 없습니다',
     tryChange: '검색어 또는 카테고리를 변경해 보세요.',
@@ -44,7 +45,8 @@ const DICT = {
     heroSub: '为您的品牌赋能。从工业设计到批量生产，我们提供一站式的优质硬件 OEM/ODM 解决方案。',
     searchPlaceholder: '搜索产品或功能...',
     catSearchPlaceholder: '查找品类...',
-    allCat: '全部品类',
+    allTopCat: '全部大类', // 新增：全部大类
+    allCat: '全部小类',
     noProduct: '未找到相关产品',
     tryChange: '请尝试更换搜索词或分类。',
     back: '返回产品目录',
@@ -65,7 +67,7 @@ const DICT = {
   }
 };
 
-// 极简 CSV 解析器 (处理带有换行和引号的单元格)
+// 极简 CSV 解析器
 function parseCSV(str) {
   const arr = [];
   let quote = false;
@@ -86,21 +88,23 @@ function parseCSV(str) {
 }
 
 export default function App() {
-  const [lang, setLang] = useState('ko'); // 默认韩文
+  const [lang, setLang] = useState('ko'); 
   const t = (key) => DICT[lang][key];
 
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const [isSplashFading, setIsSplashFading] = useState(false);
   
   const [isLoading, setIsLoading] = useState(true);
-  const [productsRaw, setProductsRaw] = useState([]); // 原始抓取数据
+  const [productsRaw, setProductsRaw] = useState([]); 
   
-  const [activeCategory, setActiveCategory] = useState('ALL');
+  // 三级分类状态管理
+  const [activeTopCategory, setActiveTopCategory] = useState('ALL'); // 最高大类
+  const [activeCategory, setActiveCategory] = useState('ALL');       // 小分类
+  
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [expandedGroups, setExpandedGroups] = useState([]);
   
-  // 【关键修复】：只存 ID，而不是存整个产品对象
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [activeModal, setActiveModal] = useState(null); 
 
@@ -111,12 +115,19 @@ export default function App() {
       .then(csvText => {
         const rows = parseCSV(csvText);
         
-        // 【从第5行开始读取表头】 (数组索引从0开始，所以第5行是索引4)
-        const HEADER_ROW_INDEX = 4; 
+        // 【升级1】自动寻找包含 'id' 或 'moq' 的那一行作为表头，不再写死第5行
+        let headerRowIndex = -1;
+        for (let i = 0; i < rows.length; i++) {
+          if (rows[i].some(cell => cell && (cell.trim().toLowerCase() === 'id' || cell.trim().toLowerCase() === 'moq'))) {
+            headerRowIndex = i;
+            break;
+          }
+        }
         
-        if (rows.length > HEADER_ROW_INDEX) {
-          const headers = rows[HEADER_ROW_INDEX].map(h => h ? h.trim() : '');
-          const data = rows.slice(HEADER_ROW_INDEX + 1).filter(r => r.length > 0 && r[0]).map(row => {
+        if (headerRowIndex !== -1 && rows.length > headerRowIndex) {
+          // 【升级2】强制把所有表头转为小写并去除空格，彻底防止大小写填错导致读不出来
+          const headers = rows[headerRowIndex].map(h => h ? h.trim().toLowerCase() : '');
+          const data = rows.slice(headerRowIndex + 1).filter(r => r.length > 0 && r[0]).map(row => {
             const obj = {};
             headers.forEach((h, i) => { 
               if (h) obj[h] = row[i] ? row[i].trim() : ''; 
@@ -163,48 +174,73 @@ export default function App() {
     return specs;
   };
 
-  // 动态生成基于当前语言的产品列表
+  // 动态生成基于当前语言的产品列表，加入 top 字段
   const products = useMemo(() => {
-    return productsRaw.map(p => ({
-      id: p.id,
-      image: p.image,
-      images: parseList(p.images),
-      detailImages: parseList(p.detailImages),
-      moq: p.moq,
-      price: p.price,
-      group: lang === 'ko' ? p.group_ko : p.group_zh,
-      category: lang === 'ko' ? p.category_ko : p.category_zh,
-      name: lang === 'ko' ? p.name_ko : p.name_zh,
-      shortDesc: lang === 'ko' ? p.shortDesc_ko : p.shortDesc_zh,
-      leadTime: lang === 'ko' ? p.leadTime_ko : p.leadTime_zh,
-      features: parseList(lang === 'ko' ? p.features_ko : p.features_zh),
-      oemOptions: parseList(lang === 'ko' ? p.oemOptions_ko : p.oemOptions_zh),
-      specs: parseSpecs(lang === 'ko' ? p.specs_ko : p.specs_zh),
-    }));
+    return productsRaw.map(p => {
+      // 【升级3】增加防空白机制：如果当前语言没填，自动借用另一种语言的内容
+      const getVal = (keyKo, keyZh) => {
+        const valKo = p[keyKo.toLowerCase()];
+        const valZh = p[keyZh.toLowerCase()];
+        // 如果是韩文模式，优先用韩文，没有就用中文。反之亦然。
+        return lang === 'ko' ? (valKo || valZh || '') : (valZh || valKo || '');
+      };
+
+      return {
+        id: p.id,
+        image: p.image,
+        images: parseList(p.images),
+        detailImages: parseList(p.detailimages), // 表头已被转为小写
+        moq: p.moq,
+        price: p.price,
+        top: getVal('top_ko', 'top_zh'),          
+        group: getVal('group_ko', 'group_zh'),    
+        category: getVal('category_ko', 'category_zh'), 
+        name: getVal('name_ko', 'name_zh') || '未命名产品 / 제품명 없음',
+        shortDesc: getVal('shortDesc_ko', 'shortDesc_zh'),
+        leadTime: getVal('leadTime_ko', 'leadTime_zh'),
+        features: parseList(getVal('features_ko', 'features_zh')),
+        oemOptions: parseList(getVal('oemOptions_ko', 'oemOptions_zh')),
+        specs: parseSpecs(getVal('specs_ko', 'specs_zh')),
+      };
+    });
   }, [productsRaw, lang]);
 
-  // 【关键修复】：根据 ID 动态获取当前选中的产品信息，语言切换时它会自动更新
   const selectedProduct = useMemo(() => {
     return products.find(p => p.id === selectedProductId) || null;
   }, [products, selectedProductId]);
 
+  // 提取所有可用的最高大类 (去重)
+  const topCategories = useMemo(() => {
+    const tops = new Set();
+    products.forEach(p => {
+      if (p.top) tops.add(p.top);
+    });
+    return Array.from(tops);
+  }, [products]);
+
+  // 动态提取左侧树状结构 (受当前选中的最高大类过滤)
   const categoryGroups = useMemo(() => {
     const map = {};
     products.forEach(p => {
+      // 核心联动逻辑：如果当前选了某个大类，过滤掉不属于该大类的产品分组
+      if (activeTopCategory !== 'ALL' && p.top !== activeTopCategory) return;
       if (!p.group || !p.category) return;
+      
       if (!map[p.group]) map[p.group] = new Set();
       map[p.group].add(p.category);
     });
+    
     const groups = Object.keys(map).map(gName => ({
       id: gName,
       name: gName,
       items: Array.from(map[gName])
     }));
+    
     if (expandedGroups.length === 0 && groups.length > 0) {
       setExpandedGroups(groups.map(g => g.id));
     }
     return groups;
-  }, [products]);
+  }, [products, activeTopCategory]);
 
   const toggleGroup = (groupId) => {
     setExpandedGroups(prev => 
@@ -212,11 +248,19 @@ export default function App() {
     );
   };
 
+  // 切换大类时，重置小分类状态
+  const handleTopCategoryClick = (top) => {
+    setActiveTopCategory(top);
+    setActiveCategory('ALL');
+  };
+
+  // 最终过滤要展示的产品 (考虑大类、小类、搜索词)
   const filteredProducts = products.filter(product => {
+    const matchTop = activeTopCategory === 'ALL' || product.top === activeTopCategory;
     const matchCategory = activeCategory === 'ALL' || product.category === activeCategory;
     const matchSearch = product.name?.toLowerCase().includes(productSearchQuery.toLowerCase()) || 
                         product.shortDesc?.toLowerCase().includes(productSearchQuery.toLowerCase());
-    return matchCategory && matchSearch;
+    return matchTop && matchCategory && matchSearch;
   });
 
   const handleLangSwitch = () => {
@@ -239,7 +283,6 @@ export default function App() {
       <nav className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-20">
-            {/* 点击返回列表：将选中的 ID 设为 null */}
             <div className="flex items-center cursor-pointer" onClick={() => setSelectedProductId(null)}>
               <div className="flex items-center gap-3">
                 <img src={LOGO_SRC} alt="SPMS Logo" className="h-8 object-contain" onError={(e)=>{e.target.style.display='none';e.target.nextElementSibling.style.display='block';}} />
@@ -284,7 +327,7 @@ export default function App() {
              1. 产品目录视图
              ========================================= */
           <div className="animate-in fade-in duration-500">
-            <div className="mb-12">
+            <div className="mb-8">
               <h1 className="text-3xl md:text-4xl font-light tracking-tight text-gray-900 mb-4">
                 {lang === 'ko' ? (
                   <>맞춤형 <span className="font-semibold">제품 라인업</span> 탐색</>
@@ -294,7 +337,7 @@ export default function App() {
               </h1>
               <p className="text-lg text-gray-500 mb-8 max-w-2xl">{t('heroSub')}</p>
               
-              <div className="relative max-w-md">
+              <div className="relative max-w-md mb-8">
                 <input 
                   type="text" 
                   placeholder={t('searchPlaceholder')}
@@ -304,10 +347,40 @@ export default function App() {
                 />
                 <Search className="absolute left-4 top-3.5 text-gray-400 w-5 h-5" />
               </div>
+
+              {/* === 新增：最高大类目 胶囊导航栏 === */}
+              {topCategories.length > 0 && (
+                <div className="flex flex-wrap gap-3 pb-6 border-b border-gray-100 mb-8">
+                  <button 
+                    onClick={() => handleTopCategoryClick('ALL')}
+                    className={`px-5 py-2.5 rounded-full text-sm font-bold transition-all duration-300 ${
+                      activeTopCategory === 'ALL' 
+                        ? 'bg-[#EE1144] text-white shadow-md shadow-[#EE1144]/20 scale-105' 
+                        : 'bg-white text-gray-600 border border-gray-200 hover:border-[#EE1144] hover:text-[#EE1144]'
+                    }`}
+                  >
+                    {t('allTopCat')}
+                  </button>
+                  {topCategories.map(top => (
+                    <button 
+                      key={top}
+                      onClick={() => handleTopCategoryClick(top)}
+                      className={`px-5 py-2.5 rounded-full text-sm font-bold transition-all duration-300 ${
+                        activeTopCategory === top 
+                          ? 'bg-[#EE1144] text-white shadow-md shadow-[#EE1144]/20 scale-105' 
+                          : 'bg-white text-gray-600 border border-gray-200 hover:border-[#EE1144] hover:text-[#EE1144]'
+                      }`}
+                    >
+                      {top}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col lg:flex-row gap-8">
               
+              {/* 侧边分类栏 (联动过滤) */}
               <div className="lg:w-64 flex-shrink-0">
                 <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm sticky top-28">
                   <div className="relative mb-6">
@@ -369,6 +442,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* 产品网格 */}
               <div className="flex-1">
                 {filteredProducts.length === 0 ? (
                   <div className="text-center py-20 bg-white rounded-2xl border border-gray-100 border-dashed">
@@ -382,7 +456,6 @@ export default function App() {
                       <div 
                         key={product.id} 
                         className="group bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-xl hover:border-transparent transition-all duration-300 cursor-pointer flex flex-col"
-                        // 【点击产品时，保存 ID】
                         onClick={() => setSelectedProductId(product.id)}
                       >
                         <div className="aspect-[4/3] bg-gray-50 overflow-hidden relative">
@@ -455,8 +528,10 @@ export default function App() {
 
                 <div className="p-8 lg:p-12 flex flex-col">
                   <div className="mb-2 flex items-center gap-3">
+                    <span className="text-sm font-medium text-gray-500">{selectedProduct.top}</span>
+                    <span className="text-gray-300">/</span>
                     <span className="text-sm font-medium text-gray-500">{selectedProduct.category}</span>
-                    <span className="px-2.5 py-1 rounded bg-[#EE1144]/10 text-[#EE1144] text-xs font-bold tracking-wider">{t('oemTag')}</span>
+                    <span className="ml-auto px-2.5 py-1 rounded bg-[#EE1144]/10 text-[#EE1144] text-xs font-bold tracking-wider">{t('oemTag')}</span>
                   </div>
                   <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">{selectedProduct.name}</h1>
                   <p className="text-lg text-gray-600 mb-8 leading-relaxed">
@@ -609,7 +684,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 底部信息 (固定的韩文公司信息) */}
+      {/* 底部信息 */}
       <footer className="bg-white border-t border-gray-100 mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="flex flex-wrap gap-6 text-sm font-medium text-gray-800 mb-8 pb-8 border-b border-gray-100">
